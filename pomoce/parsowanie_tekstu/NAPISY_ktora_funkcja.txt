@@ -1,0 +1,380 @@
+NAPISY W C — kiedy której funkcji użyć
+======================================
+
+Nagłówek prawie wszystkiego poniżej:  #include <string.h>
+strdup, strtok_r: na górze pliku, przed includami:  #define _XOPEN_SOURCE 700
+Liczba z napisu:  #include <stdlib.h>
+Sklejanie do bufora z limitem:  #include <stdio.h>   (snprintf)
+
+Napisz w C to tablica char zakończona bajtem '\0'.
+strlen liczy bajty do tego zera, nie licząc samego zera.
+"author" ma długość 6. Grecka litera potrafi zająć kilka bajtów.
+
+
+------------------------------------------------
+DŁUGOŚĆ
+------------------------------------------------
+
+strlen(s)
+    Ile bajtów do '\0'.
+    Kiedy: sprawdzić limit (user max 32, path max 128) albo czy tytuł > 64.
+    int n = strlen(user);
+    if (n > 32) odrzuć;
+
+    Nie dawaj strlen na buforze bez zera na końcu (surowe 64 bajty z readv).
+    Najpierw dopisz '\0'.
+
+strnlen(s, max)          POSIX
+    Jak strlen, ale patrzy co najwyżej max bajtów.
+    Kiedy: nie masz pewności, że w buforze jest zero.
+    size_t n = strnlen(tytul, 64);
+
+
+------------------------------------------------
+KOPIOWANIE
+------------------------------------------------
+
+strcpy(cel, zrodlo)
+    Kopiuje razem z '\0'.
+    Kiedy: cel na pewno jest większy niż strlen(zrodlo)+1.
+    char buf[128];
+    strcpy(buf, "docs/plik.txt");
+
+    Za krótki cel nadpisuje pamięć obok. Na laboratoriach bierz snprintf.
+
+strncpy(cel, zrodlo, n)
+    Kopiuje co najwyżej n bajtów. Jak źródło jest dłuższe, NIE dopisuje '\0'.
+    Kiedy: chcesz obciąć do n bajtów i sam stawiasz zero.
+    strncpy(tytul, zrodlo, 64);
+    tytul[64] = '\0';
+
+    Pusta reszta tablicy (dopełnienie zerami) jest tylko wtedy, gdy źródło
+    jest krótsze niż n. Nie polegaj na tym przy długim tytule.
+
+memcpy(cel, zrodlo, n)
+    Kopiuje dokładnie n bajtów, także zera w środku. Nie szuka '\0'.
+    Kiedy: 64 bajty tytułu z bazy, struktura, kawałek bufora.
+    memcpy(rekord.tytul, buf, 64);
+    rekord.tytul[64] = '\0';
+
+memmove(cel, zrodlo, n)
+    Jak memcpy, ale wolno, gdy cel i źródło nachodzą na siebie.
+    Kiedy: przesuwasz znaki wewnątrz tej samej tablicy.
+
+strdup(s)
+    malloc + kopia + '\0'. Wynik trzeba free.
+    Kiedy: wartość z linii getline/fgets ma przeżyć następną iterację pętli.
+    char *author = strdup(wartosc);
+    if (author == NULL) brak pamieci;
+    ...
+    free(author);
+
+    Wskaźnik w środek bufora getline przy następnym getline przestaje być ważny.
+    Zostawiasz kopię tylko przez strdup.
+
+strndup(s, n)
+    Kopia co najwyżej n bajtów, na końcu dokleja '\0'. Też free.
+    Kiedy: obciąć i jednocześnie dostać nowy napis.
+    char *krotki = strndup(tytul, 64);
+    free(krotki);
+
+
+------------------------------------------------
+DOKLEJANIE
+------------------------------------------------
+
+strcat(cel, doklej)
+    Dokleja na koniec (szuka '\0' w celu). Cel musi mieć miejsce.
+    char content[1024];
+    content[0] = '\0';          /* bez tego strcat nie wie, gdzie koniec */
+    strcat(content, buff);
+
+    Dwa pełne odczyty po 1023 znaki do tablicy 1024 wychodzą poza nią.
+    Przy długiej treści bierz większy bufor albo realloc, nie strcat w ciemno.
+
+strncat(cel, doklej, n)
+    Dokleja co najwyżej n bajtów i sama stawia '\0'.
+    Kiedy: znasz, ile wolnego miejsca zostało.
+    strncat(cel, doklej, sizeof(cel) - strlen(cel) - 1);
+
+snprintf(cel, rozmiar, "format", ...)
+    Skleja i pilnuje rozmiaru. Zawsze stawia '\0', jeśli rozmiar > 0.
+    Kiedy: ścieżka z kilku kawałków. To jest domyślny wybór na laboratoriach.
+    char path[4096];
+    int n = snprintf(path, sizeof(path), "%s/%s", katalog, nazwa);
+    if (n < 0 || (size_t)n >= sizeof(path))
+        sciezka sie nie zmiescila, nie uzywaj path;
+
+    "%s/%s/%s"  zamiast trzech strcat.
+    Zwrócona liczba to długość, która BY BYŁA bez limitu.
+    Gdy jest >= sizeof, napis został ucięty.
+
+
+------------------------------------------------
+PORÓWNYWANIE
+------------------------------------------------
+
+strcmp(a, b)
+    0  znaczy napisy RÓWNE.
+    <0 a jest "mniejsze", >0 a jest "większe" (jak w słowniku, po bajtach).
+
+    Kiedy: komenda, klucz metadanych, "." i "..".
+    if (strcmp(split[0], "GET") == 0)
+    if (strcmp(linia, "author") == 0)
+    if (strcmp(nazwa, ".") == 0 || strcmp(nazwa, "..") == 0)
+
+    if (strcmp(a, b))        to prawda, gdy napisy są RÓŻNE.
+    Równość sprawdzasz przez == 0.
+
+    "author\n" i "author" są różne. Najpierw zetnij koniec linii
+    (patrz strcspn).
+
+strncmp(a, b, n)
+    Porównuje co najwyżej n bajtów.
+    Kiedy: prefiks albo pole obcięte do 64 bajtów.
+    if (strncmp(linia, "SET", 3) == 0)
+
+strcasecmp(a, b)     POSIX, bez uwzględniania wielkości liter
+strncasecmp(a, b, n)
+    Kiedy: polecenie mówi, że wielkość liter nie ma znaczenia.
+    W tych laboratoriach zwykle MA znaczenie: "GET" to nie "get".
+    Zostaw przy strcmp.
+
+
+------------------------------------------------
+SZUKANIE
+------------------------------------------------
+
+strchr(s, znak)
+    Pierwsze wystąpienie znaku, albo NULL.
+    Kiedy: podział "klucz:wartość".
+    char *dwukropek = strchr(linia, ':');
+    if (dwukropek == NULL || dwukropek == linia)
+        pomiń;                  /* nie ma ':' albo pusty klucz */
+    *dwukropek = '\0';          /* linia staje się samym kluczem */
+    char *wartosc = dwukropek + 1;
+
+strrchr(s, znak)
+    OSTATNIE wystąpienie.
+    Kiedy: sama nazwa pliku albo rozszerzenie.
+    const char *slash = strrchr(sciezka, '/');
+    const char *nazwa = slash ? slash + 1 : sciezka;
+
+    const char *kropka = strrchr(nazwa, '.');
+    if (kropka == NULL || kropka == nazwa)
+        brak rozszerzenia;      /* ".gitignore" też zostaw w spokoju */
+    else
+        rozszerzenie = kropka + 1;
+
+strstr(s, fragment)
+    Pierwsze wystąpienie całego napisu, albo NULL.
+    Kiedy: szukasz "thesis" wewnątrz ścieżki, nie jednego znaku.
+    if (strstr(path, "..") != NULL)
+        odrzuć ścieżkę z '..';
+
+strpbrk(s, "znaki")
+    Pierwszy znak z podanego zbioru, albo NULL.
+    Kiedy: "czy w napisie jest spacja albo dwukropek".
+    if (strpbrk(user, " /:") != NULL)
+        user jest zły;
+
+strspn(s, "dozwolone")
+    Ile początkowych bajtów należy do zbioru.
+    Kiedy: user ma być samymi literami i cyframi od początku.
+    if (strspn(user, "abc...XYZ0123456789") != strlen(user))
+        jest obcy znak;
+    Na laboratoriach prościej w pętli: isalnum z ctype.h.
+
+strcspn(s, "zakazane")
+    Ile początkowych bajtów NIE należy do zbioru.
+    Kiedy: uciąć koniec linii po fgets. To jest najkrótszy sposób.
+    buf[strcspn(buf, "\r\n")] = '\0';
+
+    fgets zostawia '\n' w buforze. Bez tego strcmp z "GET" nie wyjdzie,
+    a tytuł pliku dostanie enter w nazwie.
+
+
+------------------------------------------------
+CIĘCIE NA KAWAŁKI
+------------------------------------------------
+
+strtok(s, " \t")
+    Kolejne kawałki rozdzielone spacją albo tabem.
+    Kiedy: jedna linia komendy, na pewno nie wołasz strtok w środku innego strtok.
+    Pierwsze wywołanie dostaje napis, następne dostają NULL.
+
+    char *kopia = strdup(linia);     /* strtok psuje napis, nie tnij oryginału z const */
+    char *tok = strtok(kopia, " ");
+    while (tok != NULL) {
+        /* tok ważny do następnego strtok albo do free(kopia) */
+        tok = strtok(NULL, " ");
+    }
+    free(kopia);
+
+    Nie dawaj strtok na literale "GET Alice plik". Najpierw kopia.
+    Pusta linia: pierwsze strtok zwraca NULL. Sprawdź to, zanim zrobisz split[0].
+
+strtok_r(s, " ", &save)
+    To samo, ale stan trzymasz w save, nie w funkcji.
+    Kiedy: wolisz wersję, która nie gryzie się z innym pętlą.
+    char *save = NULL;
+    for (char *tok = strtok_r(kopia, " ", &save); tok != NULL; tok = strtok_r(NULL, " ", &save))
+        użyj tok;
+
+    W utils.h jest split_string. Wynik oddajesz przez free_strings,
+    samo free(tablica) zostawia napisy.
+
+
+------------------------------------------------
+ZERA I BAJTY, NIE NAPIS
+------------------------------------------------
+
+memset(buf, 0, n)
+    Wstawia bajt (tu zero) na n pozycjach.
+    Kiedy: tytuł 64 bajty ma być dopełniony zerami, albo czyścisz strukturę.
+    char tytul[65];
+    memset(tytul, 0, sizeof(tytul));
+    Po readv i tak ustaw tytul[64] = '\0'.
+
+memchr(buf, bajt, n)
+    Szuka bajtu w dokładnie n bajtach, nie zatrzymuje się na '\0' tak jak strchr
+    w sensie długości: przeszukuje n, nawet jeśli wcześniej jest zero... 
+    strchr idzie do '\0'. memchr idzie dokładnie n bajtów.
+    Kiedy: w polu 64 bajtów z bazy szukasz zera, które kończy tytuł.
+    char *z = memchr(pole, '\0', 64);
+
+memcmp(a, b, n)
+    Porównuje n bajtów, także po zerze w środku. 0 znaczy równe.
+    Kiedy: dwa pola binarne tej samej długości, nie napisy różnej długości.
+    Do "GET" i "author" zostaw strcmp.
+
+
+------------------------------------------------
+LICZBA Z NAPISU
+------------------------------------------------
+
+strtol(tekst, &koniec, baza)     #include <stdlib.h>
+    Kiedy: argument liczbowy albo uprawnienia ósemkowe.
+    baza 10 — zwykła liczba.
+    baza 8  — "640" jako bity pliku, nie jako sześćset czterdzieści.
+
+    char *koniec = NULL;
+    errno = 0;
+    long v = strtol(tekst, &koniec, 10);
+    if (errno != 0 || koniec == tekst || *koniec != '\0')
+        napis nie jest samą liczbą;     /* odrzuca "2abc" i pusty */
+
+    atoi(tekst) nie mówi, czy się nie udało. Na laboratoriach bierz strtol.
+
+strtoul — to samo dla liczby bez znaku (rozmiar, unsigned).
+
+
+------------------------------------------------
+BŁĄD SYSTEMOWY JAKO NAPIS
+------------------------------------------------
+
+strerror(errno)      #include <string.h>  i  errno.h
+    Tekst ostatniego błędu: "No such file or directory".
+    Kiedy: sam składasz komunikat. perror już to dopisuje.
+    fprintf(stderr, "GET: Cannot read file: %s\n", path);
+    Komunikat z polecenia piszesz sam. perror dopiąłby "fopen: ..." i często
+    kończy się to złą treścią względem treści z PDF.
+
+
+------------------------------------------------
+ctype.h — POJEDYNCZY ZNAK, NIE CAŁY NAPIS
+------------------------------------------------
+
+#include <ctype.h>
+    isalnum(c)   litera albo cyfra
+    isalpha(c)   litera
+    isdigit(c)   cyfra
+    isspace(c)   spacja, tab, enter
+
+    Kiedy: user max 32, tylko litery i cyfry.
+    for (int i = 0; user[i] != '\0'; i++)
+        if (!isalnum((unsigned char)user[i]))
+            odrzuć;
+
+    Rzutowanie na unsigned char jest potrzebne, gdy bajt ma ustawiony najwyższy bit.
+    isalnum(user[i]) przy ujemnym char jest nieokreślone.
+
+    Wielkość liter: tolower((unsigned char)c), toupper(...).
+    "GET" w tych zadaniach porównuj przez strcmp, bez zmiany wielkości.
+
+
+------------------------------------------------
+CO WYBRAĆ
+------------------------------------------------
+
+Chcę wiedzieć, czy komenda to GET
+    strcmp(s, "GET") == 0
+
+Chcę odciąć '\n' po fgets
+    buf[strcspn(buf, "\r\n")] = '\0';
+
+Chcę klucz i wartość z "author:Plutarch"
+    strchr na ':', potem strcmp klucza, wartość przez strdup
+
+Chcę ścieżkę katalog/plik
+    snprintf(path, sizeof path, "%s/%s", katalog, nazwa)
+
+Chcę samą nazwę pliku z "drive/Alice/docs/a.txt"
+    strrchr(path, '/') + 1
+
+Chcę pociąć linię po spacjach
+    strdup, potem strtok albo strtok_r
+    pusta linia: pierwszy token NULL, nie czytaj split[0]
+
+Chcę zatrzymać napis poza pętlą getline
+    strdup, na końcu free
+
+Chcę obciąć tytuł do 64 bajtów
+    jeśli strlen > 64, wstaw '\0' na pozycji 64
+    albo strndup(tytul, 64)
+
+Chcę 64 bajty z pliku binarnego traktować jak napis
+    memset 65 bajtów na 0, skopiuj 64, ostatni zostaw zerem
+    nie strlen na buforze sprzed dopisania zera
+
+Chcę liczbę z argv
+    strtol, baza 10, *koniec == '\0'
+
+Chcę uprawnienia z napisu "640"
+    strtol, baza 8
+
+
+------------------------------------------------
+KIEDY WYNIK JEST ZŁY, CHOĆ FUNKCJA „COŚ ZWRÓCIŁA”
+------------------------------------------------
+
+strcmp bez == 0
+    Warunek if (strcmp(a,b)) łapie różnicę, nie równość.
+
+Został '\n'
+    "author\n" nie jest równe "author". strcspn albo ręczne scięcie.
+
+strcat do tablicy bez '\0' na początku
+    content[0] = '\0' przed pierwszym strcat.
+
+strcat / strcpy do za małej tablicy
+    Weź snprintf i sprawdź, czy wynik < sizeof.
+
+strncpy bez zera na końcu
+    Po obcięciu sami wstawiacie cel[n] = '\0'.
+
+strtok na oryginale, potem jeszcze raz ten sam napis
+    Tnij kopię. Oryginał ma wstawione zera w miejsce separatorów.
+
+split[0] przy pustej linii
+    strtok nic nie znalazł. Najpierw if (tok == NULL) albo if (count < 1).
+
+strdup bez free
+    Działa, valgrind zgłasza wyciek. Logika komendy jest dobra, punkty za
+    zasoby spadają na końcu.
+
+strlen na 64 bajtach bez '\0'
+    Czyta pamięć za tablicą albo staje w przypadkowym zerze. Najpierw dopisz zero.
+
+atoi
+    "abc" daje 0 i nie da się tego odróżnić od prawdziwego zera. strtol.
